@@ -1,0 +1,21 @@
+# Dependabot configuration — fleet security standard (owner model).
+#
+# This is the org profile repository: its tree is SECURITY.md plus .github/workflows.
+# The only package ecosystem with a manifest here is github-actions (the workflows
+# added 2026-11-03, which pin actions by SHA). Weekly cadence, zero ignores.
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      actions-all:
+        patterns: ["*"]
+    labels: [dependencies, ci]
