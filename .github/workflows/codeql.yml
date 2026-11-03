@@ -1,0 +1,86 @@
+name: codeql
+
+# Fleet CODEQL DECISION (owner standard): ADVANCED configuration.
+#
+# This repository is the org-level profile repo: its entire tree is SECURITY.md —
+# it contains ZERO analyzable source (verified 2026-11-03: `git ls-files` lists one
+# file, no .py/.js/.ts/.go/.java/.cs/.rb). CodeQL cannot run a zero-language matrix,
+# and code-scanning default-setup has nothing to set up either.
+#
+# Rather than ship a workflow that errors ("no languages detected"), the matrix is
+# DETECTED from the tracked tree at run time:
+#   - zero languages today  -> the analyze job is skipped, the workflow stays green;
+#   - code ever lands here  -> the same security-extended + security-and-quality
+#     suite the rest of the fleet runs engages automatically, with a per-language
+#     SARIF category uploaded to code scanning.
+#
+# queries: security-extended, security-and-quality (strictly subsumes the default
+# suite AND the extended suite). Triggers: push to main, PRs targeting main, weekly.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "41 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    name: detect languages
+    runs-on: ubuntu-latest
+    outputs:
+      languages: ${{ steps.set.outputs.languages }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build CodeQL language matrix from the tracked tree
+        id: set
+        shell: bash
+        run: |
+          set -euo pipefail
+          langs=()
+          count() { git ls-files | grep -cE "$1" || true; }
+          [ "$(count '\.py$')" -gt 0 ] && langs+=("python")
+          [ "$(count '\.(js|mjs|cjs|ts|tsx|jsx)$')" -gt 0 ] && langs+=("javascript")
+          [ "$(count '\.go$')" -gt 0 ] && langs+=("go")
+          [ "$(count '\.java$')" -gt 0 ] && langs+=("java")
+          [ "$(count '\.cs$')" -gt 0 ] && langs+=("csharp")
+          [ "$(count '\.rb$')" -gt 0 ] && langs+=("ruby")
+          # emit a JSON array
+          printf -v joined '%s,' "${langs[@]}"
+          matrix="[${joined%,}]"
+          [ "${#langs[@]}" -eq 0 ] && matrix="[]"
+          echo "languages=$matrix" >> "$GITHUB_OUTPUT"
+          echo "Detected CodeQL languages: $matrix"
+
+  analyze:
+    name: analyze (${{ matrix.language }})
+    needs: detect
+    if: needs.detect.outputs.languages != '[]'
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      packages: read
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJSON(needs.detect.outputs.languages) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended,security-and-quality
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
+        with:
+          category: "/language:${{ matrix.language }}"
